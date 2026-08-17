@@ -11,7 +11,7 @@
 
 4. What happens on deletion?
 
-Soft delete immediately, hard delete after 30 days.
+ In the Soft delete immediately, hard delete after 30 days.
 -->Immediate soft delete means the school disappears from the interface at once. The 30-day window exists because deletion is sometimes a mistake, and because financial records shouldn't evaporate the moment someone clicks a button.
 
 5. Can one user belong to multiple tenants?
