@@ -29,3 +29,7 @@
 
 8. Data volume
 -->100 to 1,000 schools. Take one to a thousand schools at, say, 500 students each that's up to 500,000 students, and maybe a few million payment rows a year. That is comfortably within a single well-indexed Postgres instance.
+
+
+
+### he audit log can't be tampered with by the application, because the application doesn't have UPDATE or DELETE permission on it. It's not that I didn't write a delete route  the database would refuse even if I did

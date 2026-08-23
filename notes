@@ -1,0 +1,267 @@
+# EduLevy — Setup & Verification Commands
+
+Everything run so far, in order, with what each command is for.
+Run from inside the repo folder (`sme-os`).
+
+---
+
+## 1. Create the database
+
+```bash
+psql -U postgres -c "CREATE DATABASE edulevy_db;"
+```
+
+Makes an empty database. Run as `postgres` because only a superuser can
+create databases.
+
+---
+
+## 2. Apply the schema
+
+```bash
+psql -U postgres -d edulevy_db -f sql/001_init.sql
+```
+
+Runs the file that creates all 16 tables, the balance view, the indexes, and
+the row-level security policies.
+
+- `-U postgres` — connect as this user
+- `-d edulevy_db` — connect to this database
+- `-f <file>` — run this file
+
+**Expected output:** a list of `CREATE TABLE`, `CREATE INDEX`, and one `DO`
+at the end. Any `ERROR` line means it did not fully apply.
+
+---
+
+## 3. Check the tables exist
+
+```bash
+psql -U postgres -d edulevy_db -c "\dt"
+```
+
+Lists tables. `-c` runs a single command instead of opening the interactive
+prompt. Should show 16.
+
+---
+
+## 4. Check row-level security is switched on
+
+```bash
+psql -U postgres -d edulevy_db -c "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class WHERE relkind='r' AND relnamespace='public'::regnamespace ORDER BY relname;"
+```
+
+`t` = true, `f` = false.
+
+- `relrowsecurity` — is RLS switched on for this table?
+- `relforcerowsecurity` — does it apply even to the table's owner?
+
+**Expected:** `t | t` on all 15 tenant tables, `f | f` on `tenants`.
+
+`tenants` is deliberately unprotected: it is the table that resolves *which*
+school a request belongs to, so it must be readable before any tenant is known.
+
+---
+
+## 5. Check the policies exist
+
+```bash
+psql -U postgres -d edulevy_db -c "SELECT tablename, policyname FROM pg_policies WHERE schemaname='public';"
+```
+
+**Expected:** 15 rows, all named `tenant_isolation`.
+
+Step 4 confirms security is switched on. This confirms there is an actual
+rule behind it.
+
+---
+
+## 6. Seed the two schools
+
+```bash
+psql -U postgres -d edulevy_db -f sql/002_seed.sql
+```
+
+Two schools with different dial codes, then students for each — deliberately
+using the same admission numbers (`ADM-001`, `ADM-002`, `ADM-003`) in both.
+
+The collision is the point: if isolation is broken, one school's bursar sees
+two students with the same admission number and the bug is obvious immediately.
+
+---
+
+## 7. Get the school ids
+
+```bash
+psql -U postgres -d edulevy_db -c "SELECT id, slug, name, ussd_ext FROM tenants;"
+```
+
+Every later command needs one of these UUIDs to say which school it is acting as.
+
+---
+
+## 8. Create the application role
+
+```bash
+psql -U postgres -d edulevy_db -f sql/003_app_role.sql
+```
+
+Creates `edulevy_app` — an ordinary user with no special powers.
+
+**Why this matters.** `postgres` is a superuser and superusers **bypass RLS
+entirely**. Testing as `postgres` returned all 6 students even though the
+policies were correct. The application must never connect as `postgres`, or
+every policy silently does nothing.
+
+If the password needs resetting:
+
+```bash
+psql -U postgres -d edulevy_db -c "ALTER ROLE edulevy_app WITH LOGIN PASSWORD 'your-password';"
+```
+
+Check which roles exist and what powers they have:
+
+```bash
+psql -U postgres -d edulevy_db -c "\du"
+```
+
+`postgres` shows `Superuser, … Bypass RLS`. `edulevy_app` shows nothing —
+which is exactly what is wanted.
+
+---
+
+# The three isolation tests
+
+These are the proof that multi-tenancy works. Re-run them after **any**
+schema change.
+
+All three connect as `edulevy_app`, never `postgres`.
+
+---
+
+## Test 1 — an unfiltered query returns only one school
+
+```bash
+psql -U edulevy_app -d edulevy_db -c "BEGIN; SET LOCAL app.current_tenant = '<GREEN-HILLS-UUID>'; SELECT admission_no, full_name FROM students; COMMIT;"
+```
+
+**Expected: 3 rows**, not 6.
+
+There is **no WHERE clause**. Six students exist in the table. Postgres
+returned three because the policy filtered them.
+
+This is the point of RLS: it is a safety net beneath the application code,
+for the times application code forgets to filter.
+
+`SET LOCAL` must be inside `BEGIN … COMMIT`. Outside a transaction it
+silently does nothing, and with a connection pool a plain `SET` would leak
+the tenant into the next unrelated request.
+
+---
+
+## Test 2 — a known primary key from another school returns nothing
+
+Find a student id belonging to the other school:
+
+```bash
+psql -U postgres -d edulevy_db -c "SELECT id, full_name FROM students WHERE admission_no='ADM-001';"
+```
+
+Then, acting as Green Hills, try to read St Mary's student **by exact id**:
+
+```bash
+psql -U edulevy_app -d edulevy_db -c "BEGIN; SET LOCAL app.current_tenant = '<GREEN-HILLS-UUID>'; SELECT * FROM students WHERE id = '<ST-MARYS-STUDENT-UUID>'; COMMIT;"
+```
+
+**Expected: 0 rows.**
+
+Stronger than Test 1: no guessing, no filtering — asking for one specific row
+by primary key.
+
+Note it returns *nothing* rather than "access denied". An error message would
+confirm the id exists somewhere, which is itself a small leak. Silence tells
+an attacker nothing.
+
+---
+
+## Test 3 — no tenant context fails closed
+
+```bash
+psql -U edulevy_app -d edulevy_db -c "SELECT * FROM students;"
+```
+
+**Expected: an error** (`unrecognized configuration parameter
+"app.current_tenant"`), or 0 rows. **Never all 6.**
+
+The most important of the three. How a security control behaves when
+misconfigured matters more than how it behaves when correct. This one fails
+closed — it leaks nothing rather than everything.
+
+---
+
+# Useful psql basics
+
+| Command | Does |
+|---|---|
+| `psql -U user -d db` | Open the interactive prompt |
+| `\dt` | List tables |
+| `\du` | List roles and their powers |
+| `\d students` | Describe one table |
+| `\i file.sql` | Run a file from *inside* psql |
+| `\q` | Quit |
+| `q` | Exit a paged result (`-- More --`) |
+
+Inside psql, meta-commands start with `\`. SQL statements end with `;`.
+Anything else is treated as an unfinished statement — which is why typing
+`-f sql/001_init.sql` at the `edulevy_db=#` prompt just hung.
+
+From the shell, `-c` runs one command and `-f` runs a file.
+
+---
+
+# Git commands used
+
+```bash
+git status --short
+```
+
+Shows changed files compactly.
+
+| Marker | Means |
+|---|---|
+| `M` | Modified — tracked file, changed |
+| `??` | Untracked — git has never seen it |
+| `A` | Added — staged, ready to commit |
+| `D` | Deleted |
+
+**Run this before every commit** to confirm `.env` and `.env.local` do not
+appear. Committed secrets stay in git history even after the file is deleted.
+
+```bash
+git check-ignore -v .env .env.local
+```
+
+Confirms which `.gitignore` rule covers a file. Prints nothing if the file is
+**not** ignored.
+
+```bash
+git add .gitignore
+git add sql/
+git add docs/
+git commit -m "feat: initial schema with rls and tenant isolation"
+```
+
+Separate `add` lines rather than one — if a path is wrong, it is obvious
+which one failed.
+
+---
+
+# What is still outstanding
+
+- [ ] Change `edulevy_app` password from `change-me`
+- [ ] Update `.env`: `PG_USER=edulevy_app`
+- [ ] Add `.env*` and `!.env.example` to `.gitignore` — `.env.local` is not
+      currently covered
+- [ ] Delete the duplicate: `API.md` and `APIendpoint.md` are the same document
+- [ ] Move the three isolation tests into a repeatable script
+- [ ] Record the superuser/BYPASSRLS finding in `ARCHITECTURE.md`
