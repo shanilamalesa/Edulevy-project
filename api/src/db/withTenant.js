@@ -1,3 +1,5 @@
+//runs the database query with the school already set, inside a transaction
+
 const { pool } = require('./pool');
 
 async function withTenant(tenantId, fn) {

@@ -1,5 +1,5 @@
 const express = require('express');
-const argon2 = require('argon2');
+const argon2 = require('argon2'); //for password hashing and verification
 const { pool } = require('../db/pool');
 const { withTenant } = require('../db/withTenant');
 const { createSession, destroySession } = require('../auth/session');
@@ -25,13 +25,15 @@ router.post('/login', async (req, res) => {
   }
 
   // tenants has no RLS, so this lookup runs outside withTenant()
+  //finds the school which someone has logged in
   const tenantResults = await pool.query(
     'SELECT id, name FROM tenants WHERE slug = $1 AND deleted_at IS NULL',
     [tenantSlug]
   );
   const tenant = tenantResults.rows[0];
 
-  // The tenant_id filter here is doing real work — do not remove it.
+  // The tenant_id filter, and find the user only if the school was found first
+  
   const userResults = tenant
     ? await withTenant(tenant.id, (client) =>
         client.query(
@@ -39,12 +41,15 @@ router.post('/login', async (req, res) => {
             [email]
         )
     )
+    //if no return an empty results
         : { rows: [] };
     const user = userResults.rows[0];
 
+    ////verify the password
   const valid = user
     ? await argon2.verify(user.password_hash, password)
     : await argon2.verify(DUMMY_HASH, password).catch(() => false);
+
 
   if (!user || !valid) {
     return res.status(401).json({
@@ -53,12 +58,15 @@ router.post('/login', async (req, res) => {
     });
   }
 
+  //create the session 
   const sid = await createSession({
     userId: user.id,
     tenantId: tenant.id,
     role: user.role,
   });
 
+  //sets the session cookie 
+  
   res.cookie(COOKIE_NAME, sid, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
@@ -67,6 +75,7 @@ router.post('/login', async (req, res) => {
     maxAge: 1800 * 1000,
   });
 
+  //send the response back to the browser
   return res.json({
     data: {
       id: user.id,
@@ -78,12 +87,14 @@ router.post('/login', async (req, res) => {
   });
 });
 
+//delete the session from redis, when someone  logs out
 router.post('/logout', requireSession, async (req, res) => {
-  await destroySession(req.cookies['COOKIE_NAME']);
-  res.clearCookie('COOKIE_NAME');
+  await destroySession(req.cookies[COOKIE_NAME]);
+  res.clearCookie(COOKIE_NAME);
   return res.status(204).send();
 });
 
+//
 router.get('/me', requireSession, async (req, res) => {
   return res.json({ data: req.ctx, error: null });
 });
