@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../db/pool');
 const { getState, setState } = require('../ussd/state');
 const { withTenant } = require('../db/withTenant');
+const { stkPush } = require('../mpesa/daraja');
 
 const router = express.Router();
 
@@ -121,9 +122,40 @@ router.post('/', async (req, res) => {
 
   // ── Screen 5: confirm ──
   if (state.step === 'CONFIRM') {
+    
     if (input !== '1') return res.send('END Payment cancelled.');
 
     // Day 6: the STK Push gets queued here
+    const result = await stkPush({
+        msisdn: phoneNumber,
+        amountMinor: state.amountMinor,
+        reference: state.student.full_name,
+        description: `${state.category} fees`,
+    });
+
+    console.log('stk result:', result);
+
+    if (result.ResponseCode !== '0') {
+        return res.send('END Could not start payment. Please try again.');
+    }
+
+   
+    // Record it as pending — the callback will settle it
+    await withTenant(state.tenantId, (client) =>
+        client.query(
+            `INSERT INTO payments (tenant_id, student_id, provider, provider_ref,
+                                    amount_minor, status, raw_payload)
+            VALUES ($1, $2, 'mpesa', $3, $4, 'pending', $5)`,
+            [
+                state.tenantId,
+                state.student.id,
+                result.CheckoutRequestID,
+                state.amountMinor,
+                JSON.stringify({ initiated: result, category: state.category }),
+            ]
+        )
+    );
+
     return res.send('END Payment request sent. Check your phone for the M-Pesa prompt.');
   }
 
