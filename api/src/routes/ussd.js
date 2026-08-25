@@ -143,7 +143,7 @@ router.post('/', async (req, res) => {
     // Record it as pending — the callback will settle it
     await withTenant(state.tenantId, (client) =>
         client.query(
-            `INSERT INTO payments (tenant_id, student_id, provider, provider_ref,
+            `INSERT INTO payments (tenant_id, student_id, provider, checkout_request_id,
                                     amount_minor, status, raw_payload)
             VALUES ($1, $2, 'mpesa', $3, $4, 'pending', $5)`,
             [
