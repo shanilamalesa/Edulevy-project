@@ -72,6 +72,8 @@ app.use('/webhook/mpesa/callback', require('./routes/mpesaCallback'));
 
 app.use('/webhook/whatsapp', express.urlencoded({ extended: false }), require('./routes/whatsapp'));
 
+app.use('/api/adjustments', require('./routes/adjustments'));
+
 //start the server listening for the request
 app.listen(process.env.PORT || 4000, () => {
   console.log(`API on ${process.env.PORT || 4000}`);
