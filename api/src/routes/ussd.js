@@ -8,6 +8,7 @@ const router = express.Router();
 
 router.post('/', async (req, res) => {
   const { sessionId, phoneNumber, text } = req.body;
+  console.log('phone from AT:', phoneNumber); 
   res.set('Content-Type', 'text/plain');
 
   const parts = (text || '').split('*');
@@ -141,22 +142,30 @@ router.post('/', async (req, res) => {
 
    
     // Record it as pending — the callback will settle it
-    await withTenant(state.tenantId, (client) =>
-        client.query(
-            `INSERT INTO payments (tenant_id, student_id, provider, checkout_request_id,
-                                    amount_minor, status, raw_payload)
-            VALUES ($1, $2, 'mpesa', $3, $4, 'pending', $5)`,
-            [
-                state.tenantId,
-                state.student.id,
-                result.CheckoutRequestID,
-                state.amountMinor,
-                JSON.stringify({ initiated: result, category: state.category }),
-            ]
-        )
-    );
+    await withTenant(state.tenantId, async (client) => {
+  const inserted = await client.query(
+    `INSERT INTO payments (tenant_id, student_id, provider, checkout_request_id,
+                           amount_minor, status, raw_payload)
+     VALUES ($1, $2, 'mpesa', $3, $4, 'pending', $5)
+     RETURNING id`,
+    [
+      state.tenantId,
+      state.student.id,
+      result.CheckoutRequestID,
+      state.amountMinor,
+      JSON.stringify({ initiated: result, category: state.category }),
+    ]
+  );
 
-    return res.send('END Payment request sent. Check your phone for the M-Pesa prompt.');
+  // Lookup row so the callback can resolve the tenant before RLS applies
+  await client.query(
+    `INSERT INTO payment_lookup (checkout_request_id, tenant_id, payment_id)
+     VALUES ($1, $2, $3)`,
+    [result.CheckoutRequestID, state.tenantId, inserted.rows[0].id]
+  );
+});
+
+return res.send('END Payment request sent. Check your phone for the M-Pesa prompt.');
   }
 
   return res.send('END Something went wrong.');

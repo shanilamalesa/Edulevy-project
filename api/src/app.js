@@ -4,6 +4,7 @@ const cookieParser = require('cookie-parser'); //packages & reads a cookie
 const { requireSession } = require('./middleware/requireSession');
 const { withTenant } = require('./db/withTenant');
 
+
 //starting the actual server
 const app = express();
 //
@@ -66,6 +67,10 @@ app.get('/api/students/:id/balance', requireSession, async (req, res) => {
 app.use('/api/charges', require('./routes/charges'));
 
 app.use('/webhook/ussd', express.urlencoded({ extended: false }), require('./routes/ussd'));
+
+app.use('/webhook/mpesa/callback', require('./routes/mpesaCallback'));
+
+app.use('/webhook/whatsapp', express.urlencoded({ extended: false }), require('./routes/whatsapp'));
 
 //start the server listening for the request
 app.listen(process.env.PORT || 4000, () => {
