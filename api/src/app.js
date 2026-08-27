@@ -74,6 +74,21 @@ app.use('/webhook/whatsapp', express.urlencoded({ extended: false }), require('.
 
 app.use('/api/adjustments', require('./routes/adjustments'));
 
+app.use('/api/audit-logs', require('./routes/auditLogs'));
+
+app.use('/api/payments', require('./routes/payments'));
+
+app.use('/api/guardians', require('./routes/guardians'));
+
+app.use('/api/payroll', require('./routes/payroll'));
+
+app.use('/api/staff', require('./routes/staff'));
+
+app.use('/api/announcements', require('./routes/announcements'));
+
+app.use('/api/events', require('./routes/events'));
+
+
 //start the server listening for the request
 app.listen(process.env.PORT || 4000, () => {
   console.log(`API on ${process.env.PORT || 4000}`);
