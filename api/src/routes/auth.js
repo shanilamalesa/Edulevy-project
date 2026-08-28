@@ -94,9 +94,15 @@ router.post('/logout', requireSession, async (req, res) => {
   return res.status(204).send();
 });
 
-//
 router.get('/me', requireSession, async (req, res) => {
-  return res.json({ data: req.ctx, error: null });
+  const tenant = await pool.query(
+    'SELECT name FROM tenants WHERE id = $1',
+    [req.ctx.tenantId]
+  );
+  return res.json({
+    data: { ...req.ctx, tenantName: tenant.rows[0]?.name },
+    error: null,
+  });
 });
 
 module.exports = router;
