@@ -69,6 +69,62 @@ app.get('/api/students/:id/balance', requireSession, async (req, res) => {
   res.json({ data, error: null });
 });
 
+// Full statement: charges, payments and adjustments in one timeline
+app.get('/api/students/:id/ledger', requireSession, async (req, res) => {
+  const data = await withTenant(req.ctx.tenantId, async (client) => {
+    const student = await client.query(
+      'SELECT id, admission_no, full_name, class_label FROM students WHERE id = $1 AND deleted_at IS NULL',
+      [req.params.id]
+    );
+    if (!student.rows[0]) return null;
+
+    const entries = await client.query(
+      `SELECT 'charge' AS type, c.id, c.amount_minor, c.created_at,
+              fi.label AS description, fi.category, NULL AS actor, NULL AS reference
+       FROM charges c
+       JOIN fee_items fi ON fi.id = c.fee_item_id
+       WHERE c.student_id = $1
+
+       UNION ALL
+
+       SELECT 'payment', p.id, -p.amount_minor, p.created_at,
+              p.status, NULL, NULL, p.provider_ref
+       FROM payments p
+       WHERE p.student_id = $1 AND p.status = 'settled'
+
+       UNION ALL
+
+       SELECT 'adjustment', a.id, a.amount_minor, a.created_at,
+              a.reason, a.kind, u.email, NULL
+       FROM adjustments a
+       JOIN users u ON u.id = a.actor_user_id
+       WHERE a.student_id = $1
+
+       ORDER BY created_at`,
+      [req.params.id]
+    );
+
+    const balance = await client.query(
+      `SELECT charged_minor, paid_minor, adjusted_minor, balance_minor
+       FROM student_balances WHERE student_id = $1`,
+      [req.params.id]
+    );
+
+    return {
+      student: student.rows[0],
+      balance: balance.rows[0],
+      entries: entries.rows,
+    };
+  });
+
+  if (!data) {
+    return res.status(404).json({
+      data: null, error: { message: 'Student not found', code: 'NOT_FOUND' }
+    });
+  }
+  res.json({ data, error: null });
+});
+
 //connects charges routes
 app.use('/api/charges', require('./routes/charges'));
 

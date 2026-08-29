@@ -114,7 +114,11 @@ export default function StudentsPage() {
                   const b = balances[s.id];
                   const label = balanceLabel(b?.balance_minor);
                   return (
-                    <tr key={s.id} className="hover:bg-slate-50">
+                    <tr
+                      key={s.id}
+                      onClick={() => router.push(`/students/${s.id}`)}
+                      className="hover:bg-slate-50 cursor-pointer"
+                    >
                       <td className="px-5 py-3 text-slate-500 font-mono text-xs">{s.admission_no}</td>
                       <td className="px-5 py-3 text-slate-900 font-medium">{s.full_name}</td>
                       <td className="px-5 py-3 text-slate-500">{s.class_label || '—'}</td>
