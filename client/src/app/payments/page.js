@@ -31,9 +31,9 @@ export default function PaymentsPage() {
 
       // Open the live stream. Events are filtered by tenant on the server,
       // so this only ever receives this school's payments.
-      const es = new EventSource('/api/events');
-      esRef.current = es;
-
+      const es = new EventSource('http://localhost:4000/api/events', {
+      withCredentials: true,
+    });
       es.onopen = () => setLive(true);
       es.onerror = () => setLive(false);
 

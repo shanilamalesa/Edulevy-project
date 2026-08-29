@@ -1,5 +1,6 @@
 require('dotenv').config({ path: '../.env' }); //loads the env file
 const express = require('express'); //routing & request response
+const cors = require('cors');
 const cookieParser = require('cookie-parser'); //packages & reads a cookie
 const { requireSession } = require('./middleware/requireSession');
 const { withTenant } = require('./db/withTenant');
@@ -7,6 +8,11 @@ const { withTenant } = require('./db/withTenant');
 
 //starting the actual server
 const app = express();
+
+app.use(cors({
+  origin: 'http://localhost:3000',
+  credentials: true,
+}));
 //
 app.use(express.json());
 //reads the cookie header

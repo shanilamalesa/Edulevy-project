@@ -1,7 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Forward /api/* to the Express server. The browser sees one origin,
-  // so the session cookie is sent without any CORS configuration.
+  turbopack: {
+    root: import.meta.dirname,
+  },
   async rewrites() {
     return [
       {

@@ -9,6 +9,7 @@ const CHANNEL = 'edulevy:events';
 
 // tenantId travels with the event so each stream only forwards its own
 async function publish(tenantId, type, payload) {
+  console.log('publishing:', type, tenantId);
   await publisher.publish(CHANNEL, JSON.stringify({ tenantId, type, payload }));
 }
 
@@ -21,6 +22,7 @@ subscriber.subscribe(CHANNEL, (err) => {
 subscriber.on('message', (_channel, raw) => {
   let event;
   try { event = JSON.parse(raw); } catch { return; }
+  console.log('bus received:', event.type, '→', listeners.size, 'listeners');
   for (const fn of listeners) fn(event);
 });
 
