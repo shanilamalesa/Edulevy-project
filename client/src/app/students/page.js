@@ -71,6 +71,7 @@ export default function StudentsPage() {
             <p className="text-xs text-slate-500">Signed in as {me?.role}</p>
           </div>
           <nav className="flex items-center gap-4 text-sm">
+            <a href="/fee-items" className="text-slate-500 hover:text-slate-900">Fees</a>
             <a href="/students" className="text-slate-900 font-medium">Students</a>
             <a href="/payments" className="text-slate-500 hover:text-slate-900">Payments</a>
             <button onClick={logout} className="text-slate-500 hover:text-slate-900">Sign out</button>
