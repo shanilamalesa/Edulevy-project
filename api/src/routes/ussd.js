@@ -8,7 +8,6 @@ const router = express.Router();
 
 router.post('/', async (req, res) => {
   const { sessionId, phoneNumber, text } = req.body;
-  console.log('phone from AT:', phoneNumber); 
   res.set('Content-Type', 'text/plain');
 
   const parts = (text || '').split('*');

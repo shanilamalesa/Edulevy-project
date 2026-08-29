@@ -19,7 +19,6 @@ router.get('/', requireSession, (req, res) => {
   // Events are filtered by tenant HERE. The tenant comes from the session,
   // so one school's dashboard cannot receive another's payments.
   const unsubscribe = onEvent((event) => {
-    console.log('event received:', event.type, 'for', event.tenantId);
     if (event.tenantId !== tenantId) return;
     res.write(`event: ${event.type}\n`);
     res.write(`data: ${JSON.stringify(event.payload)}\n\n`);

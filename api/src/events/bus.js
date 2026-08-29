@@ -9,7 +9,6 @@ const CHANNEL = 'edulevy:events';
 
 // tenantId travels with the event so each stream only forwards its own
 async function publish(tenantId, type, payload) {
-  console.log('publishing:', type, tenantId);
   await publisher.publish(CHANNEL, JSON.stringify({ tenantId, type, payload }));
 }
 
