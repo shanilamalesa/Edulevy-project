@@ -5,26 +5,31 @@ import { useRouter } from 'next/navigation';
 import { formatKES } from '@/lib/money';
 
 const CATEGORIES = ['tuition', 'trip', 'club', 'sport'];
+const CLASSES = ['Form 1', 'Form 2', 'Form 3', 'Form 4'];
 
 export default function FeeItemsPage() {
   const router = useRouter();
+  const [me, setMe] = useState(null);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ code: '', label: '', category: 'tuition', amount: '' });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const [bulkFor, setBulkFor] = useState(null);
+  const [bulkClass, setBulkClass] = useState('');
+  const [bulkResult, setBulkResult] = useState('');
+
   async function refresh() {
     const res = await fetch('/api/fee-items');
-    if (!res.ok) return;
-    const json = await res.json();
-    setItems(json.data || []);
+    if (res.ok) setItems((await res.json()).data || []);
   }
 
   useEffect(() => {
     async function load() {
       const meRes = await fetch('/api/auth/me');
       if (!meRes.ok) return router.push('/login');
+      setMe((await meRes.json()).data);
       await refresh();
       setLoading(false);
     }
@@ -33,9 +38,6 @@ export default function FeeItemsPage() {
 
   async function handleSubmit() {
     setError('');
-
-    // Client-side checks first, but the API validates independently —
-    // hiding a problem in the form is not the same as preventing it
     if (!form.code.trim()) return setError('Code is required');
     if (!form.label.trim()) return setError('Label is required');
 
@@ -53,7 +55,6 @@ export default function FeeItemsPage() {
         amountMinor: Math.round(shillings * 100),
       }),
     });
-
     const json = await res.json();
     setSaving(false);
 
@@ -63,28 +64,48 @@ export default function FeeItemsPage() {
     refresh();
   }
 
+  // One SQL statement charges every matching student, in one transaction —
+  // either they are all charged or none are.
+  async function chargeBulk(feeItemId) {
+    setBulkResult('');
+    const res = await fetch('/api/charges/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feeItemId, classLabel: bulkClass || undefined }),
+    });
+    const json = await res.json();
+
+    if (!res.ok) {
+      setBulkResult(json.error?.message || 'Could not charge');
+      return;
+    }
+    setBulkResult(`Charged ${json.data.created} students${bulkClass ? ` in ${bulkClass}` : ''}.`);
+    setBulkFor(null);
+    setBulkClass('');
+  }
+
   if (loading) {
     return <main className="min-h-screen grid place-items-center text-slate-400 text-sm">Loading…</main>;
   }
 
   return (
     <main className="min-h-screen bg-slate-50">
-      <header className="bg-white border-b border-slate-200">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
-          <h1 className="font-semibold text-slate-900">EduLevy</h1>
-          <nav className="flex items-center gap-4 text-sm">
-            <a href="/students" className="text-slate-500 hover:text-slate-900">Students</a>
-            <a href="/payments" className="text-slate-500 hover:text-slate-900">Payments</a>
-            <a href="/fee-items" className="text-slate-900 font-medium">Fees</a>
-          </nav>
-        </div>
-      </header>
+      <Nav active="fees" me={me} />
 
-      <div className="max-w-5xl mx-auto px-6 py-8 grid grid-cols-3 gap-6">
+      <div className="max-w-6xl mx-auto px-6 py-8 grid grid-cols-3 gap-6">
         <div className="col-span-2">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">
+          <h2 className="text-lg font-semibold text-slate-900 mb-1">
             Fee items <span className="text-slate-400 font-normal">({items.length})</span>
           </h2>
+          <p className="text-xs text-slate-500 mb-4">
+            At the start of term, charge a whole class or the whole school in one action.
+          </p>
+
+          {bulkResult && (
+            <p className="mb-4 text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+              {bulkResult}
+            </p>
+          )}
 
           {items.length === 0 ? (
             <div className="bg-white border border-slate-200 rounded-xl p-12 text-center">
@@ -100,6 +121,7 @@ export default function FeeItemsPage() {
                     <th className="text-left font-medium text-slate-600 px-5 py-3">Label</th>
                     <th className="text-left font-medium text-slate-600 px-5 py-3">Category</th>
                     <th className="text-right font-medium text-slate-600 px-5 py-3">Amount</th>
+                    <th className="px-5 py-3"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -115,6 +137,31 @@ export default function FeeItemsPage() {
                       <td className="px-5 py-3 text-right font-medium text-slate-900">
                         {formatKES(f.amount_minor)}
                       </td>
+                      <td className="px-5 py-3 text-right whitespace-nowrap">
+                        {bulkFor === f.id ? (
+                          <div className="flex gap-2 items-center justify-end">
+                            <select
+                              value={bulkClass}
+                              onChange={(e) => setBulkClass(e.target.value)}
+                              className="text-xs px-2 py-1 border border-slate-300 rounded bg-white"
+                            >
+                              <option value="">Whole school</option>
+                              {CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            <button onClick={() => chargeBulk(f.id)}
+                              className="text-xs bg-slate-900 text-white px-2 py-1 rounded">
+                              Charge
+                            </button>
+                            <button onClick={() => setBulkFor(null)}
+                              className="text-xs text-slate-400">Cancel</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => { setBulkFor(f.id); setBulkClass(''); }}
+                            className="text-xs text-slate-400 hover:text-slate-900 underline">
+                            Charge a class
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -126,10 +173,10 @@ export default function FeeItemsPage() {
         <div>
           <h2 className="text-lg font-semibold text-slate-900 mb-4">Add fee item</h2>
           <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
-            <Field label="Code" value={form.code} placeholder="T2-TUITION"
+            <Field label="Code" value={form.code} placeholder="T3-TUITION"
               onChange={(v) => setForm({ ...form, code: v })} />
 
-            <Field label="Label" value={form.label} placeholder="Term 2 Tuition"
+            <Field label="Label" value={form.label} placeholder="Term 3 Tuition"
               onChange={(v) => setForm({ ...form, label: v })} />
 
             <div>
@@ -180,5 +227,31 @@ function Field({ label, value, onChange, placeholder, type = 'text' }) {
                    focus:outline-none focus:ring-2 focus:ring-slate-900"
       />
     </div>
+  );
+}
+
+function Nav({ active, me }) {
+  const link = (href, text) => (
+    <a href={href} className={active === text.toLowerCase()
+      ? 'text-slate-900 font-medium' : 'text-slate-500 hover:text-slate-900'}>{text}</a>
+  );
+  return (
+    <header className="bg-white border-b border-slate-200">
+      <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div>
+          <h1 className="font-semibold text-slate-900">{me?.tenantName || 'EduLevy'}</h1>
+          <p className="text-xs text-slate-500">Signed in as {me?.role}</p>
+        </div>
+        <nav className="flex items-center gap-4 text-sm">
+          {link('/students', 'Students')}
+          {link('/guardians', 'Guardians')}
+          {link('/payments', 'Payments')}
+          {link('/fee-items', 'Fees')}
+          {link('/adjustments', 'Adjustments')}
+          {link('/staff', 'Staff')}
+          {link('/payroll', 'Payroll')}
+        </nav>
+      </div>
+    </header>
   );
 }

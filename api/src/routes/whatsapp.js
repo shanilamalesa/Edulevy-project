@@ -3,7 +3,7 @@ const { pool } = require('../db/pool');
 const { withTenant } = require('../db/withTenant');
 const { getState, setState, clearState } = require('../whatsapp/state');
 const { sendWhatsApp } = require('../whatsapp/send');
-const { stkPush } = require('../mpesa/daraja');
+const { startPayment } = require('../payments');
 
 const router = express.Router();
 
@@ -178,59 +178,76 @@ async function handle(from, msisdn, body) {
            `Student: ${state.student.full_name}\n` +
            `For: ${labels[state.category]}\n` +
            `Amount: KES ${(amountMinor / 100).toLocaleString()}\n\n` +
-           '1. Confirm and pay\n2. Cancel';
+           'How would you like to pay?\n' +
+           '1. M-Pesa\n' +
+           '2. Card\n' +
+           '3. Cancel';
   }
 
   // ── Step 5: confirm and push ──
-  if (state.step === 'CONFIRM') {
-    if (body === '2') {
+
+    if (state.step === 'CONFIRM') {
+    if (body === '3') {
       await clearState(from);
       return 'Payment cancelled.\n\nType MENU when you would like to start again.';
     }
 
-    if (body !== '1') {
-      return 'Reply 1 to confirm, or 2 to cancel.';
+    if (body !== '1' && body !== '2') {
+      return 'Reply 1 for M-Pesa, 2 for card, or 3 to cancel.';
     }
 
+    const provider = body === '1' ? 'mpesa' : 'paystack';
     await clearState(from);
 
-    const result = await stkPush({
+    const result = await startPayment({
+      provider,
       msisdn,
+      email: 'payments@edulevy.co.ke',
       amountMinor: state.amountMinor,
-      reference: state.student.full_name,
+      reference: `EDU-${Date.now()}`,
       description: `${state.category} fees`,
     });
 
-    if (result.ResponseCode !== '0') {
-      console.error('stk push rejected:', result);
+    if (!result.ok) {
+      console.error('payment start failed:', result.error);
       return 'We could not start the payment just now.\n\n' +
              'Please try again in a moment, or pay at the school office.';
     }
 
     await withTenant(state.tenantId, async (client) => {
+      const g = await client.query(
+        'SELECT id FROM guardians WHERE msisdn = $1', [msisdn]
+      );
+      const guardianId = g.rows[0]?.id || null;
+
       const inserted = await client.query(
-        `INSERT INTO payments (tenant_id, student_id, provider, checkout_request_id,
-                               amount_minor, status, raw_payload)
-         VALUES ($1, $2, 'mpesa', $3, $4, 'pending', $5)
+        `INSERT INTO payments (tenant_id, student_id, paid_by_guardian_id, provider,
+                               checkout_request_id, amount_minor, status, raw_payload)
+         VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
          RETURNING id`,
-        [state.tenantId, state.student.id, result.CheckoutRequestID, state.amountMinor,
+        [state.tenantId, state.student.id, guardianId, result.provider,
+         result.providerReference, state.amountMinor,
          JSON.stringify({ initiated: result, category: state.category, channel: 'whatsapp' })]
       );
 
       await client.query(
         `INSERT INTO payment_lookup (checkout_request_id, tenant_id, payment_id)
          VALUES ($1, $2, $3)`,
-        [result.CheckoutRequestID, state.tenantId, inserted.rows[0].id]
+        [result.providerReference, state.tenantId, inserted.rows[0].id]
       );
     });
 
-    return 'Payment request sent.\n\n' +
-           'Check your phone for the M-Pesa prompt and enter your PIN.\n\n' +
-           'You will receive a confirmation once the payment goes through.';
-  }
+    if (result.paymentUrl) {
+      return `Tap to pay by card:\n${result.paymentUrl}\n\n` +
+             `KES ${(state.amountMinor / 100).toLocaleString()} for ${state.student.full_name}.`;
+    }
 
-  await clearState(from);
+    return 'Payment request sent.\n\n' +
+           'Check your phone for the M-Pesa prompt and enter your PIN.';
+  }
+  
+    await clearState(from);
   return WELCOME;
-};
+}
 
 module.exports = router;

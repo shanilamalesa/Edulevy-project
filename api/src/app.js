@@ -14,7 +14,12 @@ app.use(cors({
   credentials: true,
 }));
 //
-app.use(express.json());
+app.use((req, res, next) => {
+  // The Paystack webhook signature is computed over the raw body,
+  // so it must not be parsed before verification
+  if (req.originalUrl === '/webhook/paystack') return next();
+  express.json()(req, res, next);
+});
 //reads the cookie header
 app.use(cookieParser());
 

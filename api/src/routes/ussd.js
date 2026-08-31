@@ -131,7 +131,7 @@ router.post('/', async (req, res) => {
   // or care which one runs.
   const result = await startPayment({
     msisdn: phoneNumber,
-    email: `${phoneNumber.replace('+', '')}@edulevy.local`,
+    email: 'payments@edulevy.co.ke',
     amountMinor: state.amountMinor,
     reference: `EDU-${Date.now()}`,
     description: `${state.category} fees`,

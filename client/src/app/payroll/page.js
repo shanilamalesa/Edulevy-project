@@ -232,6 +232,7 @@ function Nav({ active, me }) {
           {link('/payments', 'Payments')}
           {link('/fee-items', 'Fees')}
           {link('/adjustments', 'Adjustments')}
+          {link('/staff', 'Staff')}
           {link('/payroll', 'Payroll')}
         </nav>
       </div>
