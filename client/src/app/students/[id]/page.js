@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { formatKES } from '@/lib/money';
+import Link from 'next/link';
 
 export default function StudentPage() {
   const router = useRouter();
@@ -10,24 +11,55 @@ export default function StudentPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [feeItems, setFeeItems] = useState([]);
+  const [charging, setCharging] = useState(false);
+  const [selectedFee, setSelectedFee] = useState('');
+  const [chargeError, setChargeError] = useState('');
 
-  useEffect(() => {
-    async function load() {
-      const meRes = await fetch('/api/auth/me');
-      if (!meRes.ok) return router.push('/login');
+  async function load() {
+  const res = await fetch(`/api/students/${id}/ledger`);
+  if (res.status === 404) {
+    setNotFound(true);
+    setLoading(false);
+    return;
+  }
+  setData((await res.json()).data);
+  setLoading(false);
+}
 
-      const res = await fetch(`/api/students/${id}/ledger`);
-      if (res.status === 404) {
-        setNotFound(true);
-        setLoading(false);
-        return;
-      }
-      const json = await res.json();
-      setData(json.data);
-      setLoading(false);
-    }
-    load();
-  }, [id, router]);
+useEffect(() => {
+  async function init() {
+    const meRes = await fetch('/api/auth/me');
+    if (!meRes.ok) return router.push('/login');
+
+    const f = await fetch('/api/fee-items');
+    if (f.ok) setFeeItems((await f.json()).data || []);
+
+    await load();
+  }
+  init();
+}, [id, router]);
+
+async function addCharge() {
+  setChargeError('');
+  if (!selectedFee) return setChargeError('Choose a fee item');
+
+  setCharging(true);
+  const res = await fetch('/api/charges', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ studentId: id, feeItemId: selectedFee }),
+  });
+  setCharging(false);
+
+  if (!res.ok) {
+    const json = await res.json();
+    return setChargeError(json.error?.message || 'Could not add charge');
+  }
+
+  setSelectedFee('');
+  load();
+}
 
   if (loading) {
     return <main className="min-h-screen grid place-items-center text-slate-400 text-sm">Loading…</main>;
@@ -41,9 +73,9 @@ export default function StudentPage() {
           <p className="text-slate-500 text-sm mt-1">
             They may belong to another school.
           </p>
-          <a href="/students" className="text-sm text-slate-900 underline mt-4 inline-block">
+          <Link href="/students" className="text-sm text-slate-900 underline mt-4 inline-block">
             Back to students
-          </a>
+          </Link>
         </div>
       </main>
     );
@@ -69,9 +101,9 @@ export default function StudentPage() {
     <main className="min-h-screen bg-slate-50">
       <header className="bg-white border-b border-slate-200">
         <div className="max-w-4xl mx-auto px-6 py-4">
-          <a href="/students" className="text-sm text-slate-500 hover:text-slate-900">
+          <Link href="/students" className="text-sm text-slate-500 hover:text-slate-900">
             ← Students
-          </a>
+          </Link>
         </div>
       </header>
 
@@ -94,6 +126,40 @@ export default function StudentPage() {
             tone={bal < 0 ? 'credit' : bal === 0 ? 'paid' : 'owing'}
           />
         </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl p-4 mb-6">
+  <div className="flex items-end gap-3">
+    <div className="flex-1">
+      <label className="block text-xs font-medium text-slate-600 mb-1">Add a charge</label>
+      <select
+        value={selectedFee}
+        onChange={(e) => setSelectedFee(e.target.value)}
+        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
+      >
+        <option value="">Choose a fee item…</option>
+        {feeItems.map((f) => (
+          <option key={f.id} value={f.id}>
+            {f.label} — {formatKES(f.amount_minor)}
+          </option>
+        ))}
+      </select>
+    </div>
+    <button
+      onClick={addCharge}
+      disabled={charging}
+      className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg
+                 text-sm font-medium disabled:opacity-50"
+    >
+      {charging ? 'Adding…' : 'Add charge'}
+    </button>
+  </div>
+  {chargeError && (
+    <p className="mt-2 text-sm text-red-600">{chargeError}</p>
+  )}
+  <p className="text-xs text-slate-400 mt-2">
+    The amount comes from the fee item, not from this form.
+  </p>
+</div>
 
         <h2 className="text-sm font-medium text-slate-700 mb-3">Statement</h2>
 

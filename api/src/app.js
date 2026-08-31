@@ -34,6 +34,63 @@ app.get('/api/students', requireSession, async (req, res) => {
   res.json({ data: result.rows, error: null });
 });
 
+// Create a student
+app.post('/api/students', requireSession, async (req, res) => {
+  const { admissionNo, fullName, classLabel } = req.body || {};
+
+  if (!admissionNo || !fullName) {
+    return res.status(400).json({
+      data: null,
+      error: { message: 'admissionNo and fullName are required', code: 'BAD_REQUEST' }
+    });
+  }
+
+  try {
+    const result = await withTenant(req.ctx.tenantId, (client) =>
+      client.query(
+        `INSERT INTO students (tenant_id, admission_no, full_name, class_label)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, admission_no, full_name, class_label`,
+        [req.ctx.tenantId, admissionNo.trim(), fullName.trim(), classLabel || null]
+      )
+    );
+    res.status(201).json({ data: result.rows[0], error: null });
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({
+        data: null,
+        error: { message: 'That admission number already exists at this school', code: 'DUPLICATE_ADMISSION' }
+      });
+    }
+    throw err;
+  }
+});
+
+// Edit a student. admission_no is deliberately immutable — it appears on
+// receipts and parents use it to identify the student, so changing it
+// would orphan history.
+app.patch('/api/students/:id', requireSession, async (req, res) => {
+  const { fullName, classLabel } = req.body || {};
+
+  const result = await withTenant(req.ctx.tenantId, (client) =>
+    client.query(
+      `UPDATE students SET
+         full_name   = COALESCE($2, full_name),
+         class_label = COALESCE($3, class_label)
+       WHERE id = $1 AND deleted_at IS NULL
+       RETURNING id, admission_no, full_name, class_label`,
+      [req.params.id, fullName || null, classLabel || null]
+    )
+  );
+
+  if (!result.rows[0]) {
+    return res.status(404).json({
+      data: null, error: { message: 'Student not found', code: 'NOT_FOUND' }
+    });
+  }
+  res.json({ data: result.rows[0], error: null });
+});
+
 //endpoint for connection of the fee-items 
 app.use('/api/fee-items', require('./routes/feeItems'));
 
@@ -134,6 +191,10 @@ app.use('/webhook/mpesa/callback', require('./routes/mpesaCallback'));
 
 app.use('/webhook/whatsapp', express.urlencoded({ extended: false }), require('./routes/whatsapp'));
 
+app.use('/webhook/paystack',
+  express.raw({ type: 'application/json' }),
+  require('./routes/paystackWebhook'));
+
 app.use('/api/adjustments', require('./routes/adjustments'));
 
 app.use('/api/audit-logs', require('./routes/auditLogs'));
@@ -149,6 +210,8 @@ app.use('/api/staff', require('./routes/staff'));
 app.use('/api/announcements', require('./routes/announcements'));
 
 app.use('/api/events', require('./routes/events'));
+
+app.use('/r', require('./routes/receipts'));
 
 
 //start the server listening for the request

@@ -2,12 +2,14 @@ const express = require('express');
 const { pool } = require('../db/pool');
 const { getState, setState } = require('../ussd/state');
 const { withTenant } = require('../db/withTenant');
-const { stkPush } = require('../mpesa/daraja');
+const { startPayment } = require('../payments');
+const { sendSMS } = require('../notify/sms');
 
 const router = express.Router();
 
 router.post('/', async (req, res) => {
   const { sessionId, phoneNumber, text } = req.body;
+  // console.log('phone from AT:', phoneNumber); 
   res.set('Content-Type', 'text/plain');
 
   const parts = (text || '').split('*');
@@ -122,51 +124,57 @@ router.post('/', async (req, res) => {
 
   // ── Screen 5: confirm ──
   if (state.step === 'CONFIRM') {
-    
-    if (input !== '1') return res.send('END Payment cancelled.');
+  if (input !== '1') return res.send('END Payment cancelled.');
 
-    // Day 6: the STK Push gets queued here
-    const result = await stkPush({
-        msisdn: phoneNumber,
-        amountMinor: state.amountMinor,
-        reference: state.student.full_name,
-        description: `${state.category} fees`,
-    });
+  // The provider is chosen from the payer's number — M-Pesa for Kenyan
+  // numbers, card checkout for everyone else. This route does not know
+  // or care which one runs.
+  const result = await startPayment({
+    msisdn: phoneNumber,
+    email: `${phoneNumber.replace('+', '')}@edulevy.local`,
+    amountMinor: state.amountMinor,
+    reference: `EDU-${Date.now()}`,
+    description: `${state.category} fees`,
+  });
 
-    console.log('stk result:', result);
-
-    if (result.ResponseCode !== '0') {
-        return res.send('END Could not start payment. Please try again.');
-    }
-
-   
-    // Record it as pending — the callback will settle it
-    await withTenant(state.tenantId, async (client) => {
-  const inserted = await client.query(
-    `INSERT INTO payments (tenant_id, student_id, provider, checkout_request_id,
-                           amount_minor, status, raw_payload)
-     VALUES ($1, $2, 'mpesa', $3, $4, 'pending', $5)
-     RETURNING id`,
-    [
-      state.tenantId,
-      state.student.id,
-      result.CheckoutRequestID,
-      state.amountMinor,
-      JSON.stringify({ initiated: result, category: state.category }),
-    ]
-  );
-
-  // Lookup row so the callback can resolve the tenant before RLS applies
-  await client.query(
-    `INSERT INTO payment_lookup (checkout_request_id, tenant_id, payment_id)
-     VALUES ($1, $2, $3)`,
-    [result.CheckoutRequestID, state.tenantId, inserted.rows[0].id]
-  );
-});
-
-return res.send('END Payment request sent. Check your phone for the M-Pesa prompt.');
+    if (!result.ok) {
+    console.error('payment start failed:', result.error);
+    return res.send('END Could not start payment. Please try again.');
   }
 
+  await withTenant(state.tenantId, async (client) => {
+    // Who paid — needed so the receipt SMS knows where to go
+    const g = await client.query(
+      'SELECT id FROM guardians WHERE msisdn = $1', [phoneNumber]
+    );
+    const guardianId = g.rows[0]?.id || null;
+
+    const inserted = await client.query(
+      `INSERT INTO payments (tenant_id, student_id, paid_by_guardian_id, provider,
+                             checkout_request_id, amount_minor, status, raw_payload)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
+       RETURNING id`,
+      [state.tenantId, state.student.id, guardianId, result.provider,
+       result.providerReference, state.amountMinor,
+       JSON.stringify({ initiated: result, category: state.category, channel: 'ussd' })]
+    );
+
+    await client.query(
+      `INSERT INTO payment_lookup (checkout_request_id, tenant_id, payment_id)
+       VALUES ($1, $2, $3)`,
+      [result.providerReference, state.tenantId, inserted.rows[0].id]
+    );
+  });
+
+  // A card link cannot be typed from a feature phone, so it goes by SMS
+  if (result.paymentUrl) {
+    await sendSMS(phoneNumber,
+      `EduLevy: pay ${state.student.full_name}'s ${state.category} fees here — ${result.paymentUrl}`);
+    return res.send('END Payment link sent by SMS. Open it to pay by card.');
+  }
+
+  return res.send(`END ${result.instruction}`);
+}
   return res.send('END Something went wrong.');
 });
 

@@ -2,6 +2,8 @@ const express = require('express');
 const { withTenant } = require('../db/withTenant');
 const { pool } = require('../db/pool');
 const { publish } = require('../events/bus');
+const crypto = require('crypto');
+const { sendSMS } = require('../notify/sms');
 
 const router = express.Router();
 
@@ -67,18 +69,22 @@ router.post('/', async (req, res) => {
     return res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
   }
 
-  // ── Success ──
+   // ── Success ──
   const items = cb.CallbackMetadata?.Item || [];
   const get = (name) => items.find((i) => i.Name === name)?.Value;
   const receipt = get('MpesaReceiptNumber');
+
+  // Unguessable, because the receipt link is opened without logging in
+  const token = crypto.randomBytes(16).toString('hex');
 
   await withTenant(lookup.tenant_id, (client) =>
     client.query(
       `UPDATE payments SET status = 'settled',
                            provider_ref = $2,
-                           raw_payload = raw_payload || $3::jsonb
+                           receipt_token = $3,
+                           raw_payload = raw_payload || $4::jsonb
        WHERE id = $1`,
-      [payment.id, receipt, JSON.stringify({ callback: cb })]
+      [payment.id, receipt, token, JSON.stringify({ callback: cb })]
     )
   );
 
@@ -89,6 +95,26 @@ router.post('/', async (req, res) => {
     receipt,
     amountMinor: get('Amount') ? get('Amount') * 100 : null,
   });
+
+  // Confirmation SMS with the receipt link
+  const details = await withTenant(lookup.tenant_id, (client) =>
+    client.query(
+      `SELECT s.full_name, s.admission_no, g.msisdn, p.amount_minor
+       FROM payments p
+       JOIN students s ON s.id = p.student_id
+       LEFT JOIN guardians g ON g.id = p.paid_by_guardian_id
+       WHERE p.id = $1`,
+      [payment.id]
+    )
+  );
+  const d = details.rows[0];
+
+  if (d?.msisdn) {
+    await sendSMS(d.msisdn,
+      `Payment received for ${d.full_name}, admission ${d.admission_no}. ` +
+      `KES ${(Number(d.amount_minor) / 100).toLocaleString()}. ` +
+      `Receipt: ${process.env.PUBLIC_URL}/r/${token}`);
+  }
 
   return res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
 });

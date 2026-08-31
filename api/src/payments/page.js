@@ -3,49 +3,30 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { formatKES } from '@/lib/money';
-import Link from 'next/link';
 
-
+// A short two-tone chime, generated rather than loaded from a file —
+// avoids shipping an audio asset and works offline.
 function playChime() {
-  const ctx = new AudioContext();
-  const now = ctx.currentTime;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const now = ctx.currentTime;
 
-  // Two bright notes very close together with a fast decay — the
-  // acoustic signature of a coin: high, metallic, gone quickly
-  [[1319, 0], [1976, 0.07]].forEach(([freq, delay]) => {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = 'triangle';           // more metallic than sine
-    osc.frequency.value = freq;
-
-    gain.gain.setValueAtTime(0, now + delay);
-    gain.gain.linearRampToValueAtTime(0.15, now + delay + 0.005);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.25);
-
-    osc.connect(gain).connect(ctx.destination);
-    osc.start(now + delay);
-    osc.stop(now + delay + 0.3);
-  });
-}
-
-function playFailTone() {
-  const ctx = new AudioContext();
-  const now = ctx.currentTime;
-
-  // A single low note, falling — the opposite shape to the coin
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.type = 'sine';
-  osc.frequency.setValueAtTime(400, now);
-  osc.frequency.exponentialRampToValueAtTime(220, now + 0.3);
-
-  gain.gain.setValueAtTime(0.1, now);
-  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-
-  osc.connect(gain).connect(ctx.destination);
-  osc.start(now);
-  osc.stop(now + 0.4);
+    [880, 1320].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.0001, now + i * 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.15, now + i * 0.12 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.12 + 0.3);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + i * 0.12);
+      osc.stop(now + i * 0.12 + 0.35);
+    });
+  } catch {
+    // Browsers block audio until the user has interacted with the page.
+    // Not worth surfacing — the visual banner still fires.
+  }
 }
 
 export default function PaymentsPage() {
@@ -73,17 +54,18 @@ export default function PaymentsPage() {
       await refresh();
       setLoading(false);
 
-      // Open the live stream. Events are filtered by tenant on the server,
-      // so this only ever receives this school's payments.
+      // Connects straight to the API rather than through the Next rewrite,
+      // which buffers streaming responses and cuts the connection.
       const es = new EventSource('http://localhost:4000/api/events', {
-      withCredentials: true,
-    });
+        withCredentials: true,
+      });
+      esRef.current = es;
+
       es.onopen = () => setLive(true);
       es.onerror = () => setLive(false);
 
       es.addEventListener('payment.settled', (e) => {
         const payload = JSON.parse(e.data);
-        console.log('settled event', payload);
         playChime();
         setFlash({ tone: 'settled', ...payload });
         refresh();
@@ -92,7 +74,6 @@ export default function PaymentsPage() {
 
       es.addEventListener('payment.failed', (e) => {
         const payload = JSON.parse(e.data);
-        playFailTone();
         setFlash({ tone: 'failed', ...payload });
         refresh();
         setTimeout(() => setFlash(null), 6000);
@@ -127,9 +108,12 @@ export default function PaymentsPage() {
             <p className="text-xs text-slate-500">Signed in as {me?.role}</p>
           </div>
           <nav className="flex items-center gap-4 text-sm">
-            <Link href="/fee-items" className="text-slate-500 hover:text-slate-900">Fees</Link>
-            <Link href="/students" className="text-slate-500 hover:text-slate-900">Students</Link>
-            <Link href="/payments" className="text-slate-900 font-medium">Payments</Link>
+            <a href="/students" className="text-slate-500 hover:text-slate-900">Students</a>
+            <a href="/guardians" className="text-slate-500 hover:text-slate-900">Guardians</a>
+            <a href="/payments" className="text-slate-900 font-medium">Payments</a>
+            <a href="/fee-items" className="text-slate-500 hover:text-slate-900">Fees</a>
+            <a href="/adjustments" className="text-slate-500 hover:text-slate-900">Adjustments</a>
+            <a href="/payroll" className="text-slate-500 hover:text-slate-900">Payroll</a>
             <button onClick={logout} className="text-slate-500 hover:text-slate-900">Sign out</button>
           </nav>
         </div>
