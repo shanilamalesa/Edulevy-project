@@ -15,6 +15,9 @@ async function createSession({ userId, tenantId, role }) {
     };
     //storing in redis
     await redis.set(`sess:${sid}`, JSON.stringify(record), 'EX', IDLE_TTL);
+      // Index sessions by user so an account can be revoked immediately
+    await redis.sadd(`user-sessions:${userId}`, sid);
+    await redis.expire(`user-sessions:${userId}`, ABSOLUTE_TTL);
     return sid;
 }
 

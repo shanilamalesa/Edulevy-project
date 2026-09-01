@@ -37,7 +37,7 @@ router.post('/login', async (req, res) => {
   const userResults = tenant
     ? await withTenant(tenant.id, (client) =>
         client.query(
-            'SELECT id, email, password_hash, role FROM users WHERE lower(email) = lower($1) AND deleted_at IS NULL',
+            'SELECT id, email, password_hash, role, status FROM users WHERE lower(email) = lower($1) AND deleted_at IS NULL',
             [email]
         )
     )
@@ -58,6 +58,15 @@ router.post('/login', async (req, res) => {
     });
   }
 
+    // A pending or deactivated account gets the same response as a wrong
+  // password. Saying "awaiting approval" would confirm the email exists.
+  if (user.status !== 'active') {
+    return res.status(401).json({
+      data: null,
+      error: { message: 'Invalid credentials', code: 'INVALID_CREDENTIALS' }
+    });
+  }
+
   //create the session 
   const sid = await createSession({
     userId: user.id,
@@ -65,6 +74,7 @@ router.post('/login', async (req, res) => {
     role: user.role,
   });
 
+  
   //sets the session cookie 
   
   res.cookie(COOKIE_NAME, sid, {
@@ -103,6 +113,59 @@ router.get('/me', requireSession, async (req, res) => {
     data: { ...req.ctx, tenantName: tenant.rows[0]?.name },
     error: null,
   });
+});
+
+
+// Public: anyone can request an account, but it is useless until a manager
+// approves it. The school code scopes the request to one tenant.
+router.post('/register', async (req, res) => {
+  console.log('register attempt', req.body);
+  const { email, password, tenantSlug, role } = req.body || {};
+
+  if (!email || !password || !tenantSlug) {
+    return res.status(400).json({
+      data: null,
+      error: { message: 'email, password and tenantSlug are required', code: 'BAD_REQUEST' }
+    });
+  }
+  if (password.length < 8) {
+    return res.status(400).json({
+      data: null,
+      error: { message: 'Password must be at least 8 characters', code: 'WEAK_PASSWORD' }
+    });
+  }
+
+  const t = await pool.query(
+    'SELECT id FROM tenants WHERE slug = $1 AND deleted_at IS NULL',
+    [tenantSlug]
+  );
+  const tenant = t.rows[0];
+  console.log('tenant found:', tenant?.id ||'NONE');
+
+  // The same reply whether or not the school exists, and whether or not
+  // the email is already taken — otherwise this endpoint would let anyone
+  // discover which schools and which staff exist.
+  const accepted = {
+    data: { message: 'Request submitted. A manager will review it.' },
+    error: null,
+  };
+
+  if (!tenant) return res.status(202).json(accepted);
+
+  try {
+    const hash = await argon2.hash(password);
+    await withTenant(tenant.id, (client) =>
+      client.query(
+        `INSERT INTO users (tenant_id, email, password_hash, role, status)
+         VALUES ($1, $2, $3, $4, 'pending')`,
+        [tenant.id, email.trim(), hash, role === 'manager' ? 'manager' : 'bursar']
+      )
+    );
+  } catch (err) {
+    if (err.code !== '23505') throw err;
+  }
+
+  return res.status(202).json(accepted);
 });
 
 module.exports = router;

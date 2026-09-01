@@ -212,6 +212,8 @@ app.use('/api/payroll', require('./routes/payroll'));
 
 app.use('/api/staff', require('./routes/staff'));
 
+app.use('/api/users', require('./routes/users'));
+
 app.use('/api/announcements', require('./routes/announcements'));
 
 app.use('/api/events', require('./routes/events'));

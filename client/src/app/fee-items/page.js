@@ -250,6 +250,7 @@ function Nav({ active, me }) {
           {link('/adjustments', 'Adjustments')}
           {link('/staff', 'Staff')}
           {link('/payroll', 'Payroll')}
+          {link('/users', 'Accounts')}
         </nav>
       </div>
     </header>

@@ -290,6 +290,7 @@ function Nav({ active, me, onLogout }) {
           {link('/fee-items', 'Fees')}
           {link('/adjustments', 'Adjustments')}
           {link('/payroll', 'Payroll')}
+          {link('/users', 'Accounts')}
           <button onClick={onLogout} className="text-slate-500 hover:text-slate-900">Sign out</button>
         </nav>
       </div>

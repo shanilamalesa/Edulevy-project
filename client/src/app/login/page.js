@@ -100,6 +100,12 @@ async function handleSubmit(e) {
               >
                 {loading ? 'Signing in…' : 'Sign in'}
               </button>
+              <p className="text-center text-sm text-slate-500 mt-6">
+                  Need an account? <a href="/register" className="text-slate-900 underline">Request one</a>
+            </p>
+            <p className="text-center text-xs text-slate-400 mt-4">
+              Newly requested accounts cannot sign in until a manager approves them.
+          </p>
             </div>
           </div>
         </div>
