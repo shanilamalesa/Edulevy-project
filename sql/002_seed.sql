@@ -1,6 +1,8 @@
--- INSERT INTO tenants (slug, name, ussd_ext)
--- VALUES  ('Green-hills', 'Green-Hills School', '001'),
---         ('St-mary', 'St-Marys School', '002');
+-- Fixed ids so the students below and the scripts in api/ (seed-demo.js,
+-- make-manager.js, ...) point at the same tenants on every fresh database.
+INSERT INTO tenants (id, slug, name, ussd_ext)
+VALUES  ('eadd75ae-1946-45f7-a73b-ea2b850b8d2c', 'Green-hills', 'Green-Hills School', '001'),
+        ('41c2bc98-5776-489f-9f10-085fab23bc8a', 'St-mary', 'St-Marys School', '002');
 
 BEGIN;
 SET LOCAL app.current_tenant = 'eadd75ae-1946-45f7-a73b-ea2b850b8d2c';

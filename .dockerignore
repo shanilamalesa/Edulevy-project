@@ -1,0 +1,12 @@
+node_modules
+client
+cookies.txt
+npm-debug.log
+.git
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+coverage/
+.vscode/
