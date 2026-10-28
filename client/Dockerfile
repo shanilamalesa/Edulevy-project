@@ -4,6 +4,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
+# Next bakes the rewrite destination in at build time, so the API address
+# must be known here, not only when the container starts
+ARG API_URL=http://localhost:4000
+ENV API_URL=$API_URL
 RUN npm run build
 
 # Stage 2: production deps + the build output only
