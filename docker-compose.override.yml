@@ -1,0 +1,22 @@
+# Dev-only additions, merged automatically by `docker compose up`.
+# Skipped when the base file is named explicitly with -f.
+
+services:
+  api:
+    # Only api/ is mounted: node_modules lives at /app/node_modules in the
+    # image, outside the mount, so the container keeps its Linux build of argon2
+    volumes:
+      - ./api:/app/api
+    # Node's built-in watcher restarts on file changes, no nodemon needed
+    command: ["node", "--watch", "api/src/app.js"]
+    environment:
+      NODE_ENV: development
+
+  # Host ports shifted by one so they don't clash with a local Postgres/Redis
+  postgres:
+    ports:
+      - "5433:5432"
+
+  redis:
+    ports:
+      - "6380:6379"

@@ -2,3 +2,5 @@ node_modules/
 .env*
 !.env.example
 cookies.txt
+# volume backups (Week 25 Day 3)
+backups/

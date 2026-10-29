@@ -1,27 +1,52 @@
+# Base file: production-shaped. Dev additions live in docker-compose.override.yml,
+# which `docker compose up` merges in automatically.
+#   dev:  docker compose up -d
+#   prod: docker compose -f docker-compose.yml up -d
+
+# Shared log rotation: 10 MB per file, 5 files, so at most 50 MB per container
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   api:
     build: .
     image: edulevy-api:dev
+    restart: unless-stopped
+    # 4000 stays published until Nginx becomes the front door (Day 4):
+    # the payments page opens its live event stream straight from the browser
     ports:
       - "4000:4000"
     env_file: .env
     # Override the localhost values from .env: inside the compose network,
     # each service is reached by its service name.
     environment:
+      NODE_ENV: production
       PG_HOST: postgres
       PG_PORT: 5432
       REDIS_URL: redis://redis:6379
+    networks: [backend, frontend]
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "-O", "-", "http://localhost:4000/health"]
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:4000/health"]
       interval: 10s
       timeout: 3s
       retries: 3
-      start_period: 10s
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          memory: 128M
+    logging: *logging
 
   web:
     build:
@@ -29,16 +54,31 @@ services:
       args:
         API_URL: http://api:4000
     image: edulevy-web:dev
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
       API_URL: http://api:4000
+    networks: [frontend]
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:3000"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    logging: *logging
 
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: edulevy_db
       POSTGRES_USER: postgres
@@ -47,21 +87,42 @@ services:
       # Files here run once, in name order, the first time the volume is created
       - ./sql:/docker-entrypoint-initdb.d:ro
       - pgdata:/var/lib/postgresql/data
+    networks: [backend]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d edulevy_db"]
       interval: 5s
       timeout: 3s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    logging: *logging
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     volumes:
       - redisdata:/data
+    networks: [backend]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+    logging: *logging
+
+# backend: databases plus the API. web is not on it, so it cannot reach them.
+# frontend: web and the API (Nginx joins it on Day 4).
+networks:
+  backend:
+  frontend:
 
 volumes:
   pgdata:
